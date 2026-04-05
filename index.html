@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام أبو علي - 2000 سعرة</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        :root { --primary: #2c3e50; --accent: #3498db; --success: #27ae60; --bg: #f4f7f9; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); margin: 0; padding: 10px; color: var(--primary); }
+        
+        #printArea { background: white; padding: 25px; border-radius: 12px; max-width: 800px; margin: auto; }
+        .header-box { text-align: center; border-bottom: 3px solid var(--accent); margin-bottom: 20px; padding-bottom: 10px; }
+        
+        .meal-card { background: var(--primary); color: white; padding: 12px; border-radius: 8px; margin-top: 15px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .sub-sec { margin-right: 15px; border-right: 3px solid var(--accent); padding-right: 10px; margin-top: 8px; }
+        .sub-head { color: var(--accent); font-weight: bold; font-size: 0.95em; cursor: pointer; }
+        
+        .item-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .checkbox { width: 22px; height: 22px; border: 2px solid var(--accent); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .checked { background: var(--success); border-color: var(--success); color: white; }
+        .checked::after { content: "✓"; font-weight: bold; }
+
+        .summary-stats { background: #2c3e50; color: white; padding: 20px; border-radius: 12px; margin-top: 25px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
+        .stat-card { background: rgba(255,255,255,0.1); padding: 8px; border-radius: 6px; text-align: center; font-size: 13px; }
+        
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px auto; max-width: 800px; }
+        .btn { border: none; padding: 15px; border-radius: 8px; font-weight: bold; cursor: pointer; color: white; }
+        .btn-png { background: #3498db; } .btn-print { background: #e74c3c; }
+
+        #editModal { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); border-radius: 12px; z-index: 1000; width: 85%; max-width: 400px; }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; }
+
+        @media print {
+            .btn-group, select, #editModal, .overlay { display: none !important; }
+            body { background: white; padding: 0; }
+            #printArea { box-shadow: none; width: 100%; max-width: 100%; margin: 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="printArea">
+    <div class="header-box">
+        <h1 style="margin:0; font-size: 22px;">تقرير المتابعة الصحية اليومي</h1>
+        <h2 style="margin:5px 0; font-size: 18px; color: var(--accent);">نظام 2000 سعرة حرارية</h2>
+        <p id="dateLabel" style="color: #666; font-weight: bold;"></p>
+    </div>
+
+    <select id="daySelector" onchange="loadDay()" style="width:100%; padding:12px; border:2px solid var(--accent); border-radius:8px; margin-bottom:15px; font-weight:bold;">
+        <option value="1">اليوم الأول</option>
+        <option value="2">اليوم الثاني</option>
+        <option value="3">اليوم الثالث</option>
+        <option value="4">اليوم الرابع</option>
+    </select>
+
+    <div id="mainContainer"></div>
+
+    <div class="summary-stats">
+        <h3 style="margin:0; text-align: center;">📊 تفصيل الحصص المنفذة</h3>
+        <div class="stats-grid" id="detailGrid"></div>
+        <div id="totalLabel" style="text-align: center; margin-top: 15px; font-size: 1.2em; font-weight: bold; border-top: 1px solid #555; padding-top: 10px;"></div>
+    </div>
+</div>
+
+<div class="btn-group">
+    <button class="btn btn-png" onclick="saveAsPNG()">حفظ صورة PNG</button>
+    <button class="btn btn-print" onclick="window.print()">طباعة</button>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeModal()"></div>
+<div id="editModal">
+    <h3 id="modalTitle">تعديل</h3>
+    <textarea id="editInput" style="width:100%; height:80px; border-radius:8px; padding:10px; margin-bottom:10px;"></textarea>
+    <div id="altInfo" style="font-size:11px; color:#666; background:#f9f9f9; padding:8px; margin-bottom:10px;"></div>
+    <button class="btn" style="background:var(--success); width:100%;" onclick="applyChanges()">حفظ</button>
+    <button id="delBtn" class="btn" style="background:#e74c3c; width:100%; margin-top:5px;" onclick="removeItem()">حذف</button>
+</div>
+
+<script>
+    let alts = JSON.parse(localStorage.getItem('alts_db')) || {
+        "كربوهيدرات": "نصف خبز، 3 ملعقة أرز، 1 توست.",
+        "بروتين": "30جم لحم، 1 بيضة، ملعقة جبن.",
+        "خضروات": "كوب طازج، سلطة.",
+        "ألبان": "كوب حليب، زبادي.",
+        "فواكه": "تفاحة، 2 كيوي.",
+        "دهون": "ملعقة زيت، 5 زيتون."
+    };
+
+    let daysData = {
+        1: {
+            "الافطار": { "بروتين": ["2 بيضة (2)"], "كربوهيدرات": ["2 سليس أسمر (2)"], "ألبان": ["حليب (1)"], "دهون": ["5 زيتون (1)"], "خضروات": ["طماطم وخيار (1)"] },
+            "سناك الصباح": { "خضروات": ["2 جزر (1)"], "فواكه": ["كيوي (1)"] },
+            "الغداء": { "بروتين": ["مرق روبيان (4.5)"], "كربوهيدرات": ["أرز (3)"], "خضروات": ["سلطة (2)"], "دهون": ["زيت زيتون (1)"] },
+            "سناك المساء": { "فواكه": ["برتقال (1)"], "دهون": ["فول سوداني (2)"] },
+            "العشاء": { "خضروات": ["سلطة (1)"], "بروتين": ["بيضة (1)", "جبنة (1)"], "كربوهيدرات": ["خبز (3)", "نخي (2)"], "ألبان": ["روب (1)"] }
+        },
+        2: {
+            "الافطار": { "كربوهيدرات": ["بقصم (2)"], "بروتين": ["جبنة (1)"], "ألبان": ["حليب (1)"], "خضروات": ["خيار وخس (1)"] },
+            "سناك الصباح": { "خضروات": ["كرفس (1)"], "فواكه": ["عنب (1)"] },
+            "الغداء": { "بروتين": ["دجاج (4.5)"], "كربوهيدرات": ["خبز تنور (5)", "بطاطس (1)"], "خضروات": ["سلطة (2)"], "دهون": ["افوكادو (1)"] },
+            "سناك المساء": { "فواكه": ["مانجو (1)", "تمر (1.5)"] },
+            "العشاء": { "بروتين": ["2 بيض (2)"], "خضروات": ["طماطم وسبانخ (1)", "شوربة خضار (1)"], "دهون": ["زيت (1)"], "ألبان": ["روب (1)"], "كربوهيدرات": ["2 توست (2)"] }
+        },
+        3: {
+            "الافطار": { "كربوهيدرات": ["شوفان (2)"], "ألبان": ["حليب (1)"], "دهون": ["لوز (1)"], "فواكه": ["فواكه مجففه (1)"] },
+            "سناك الصباح": { "خضروات": ["جزر (1)"], "كربوهيدرات": ["بسكويت (1)"], "ألبان": ["لبنة (1)"] },
+            "الغداء": { "بروتين": ["سمك (4.5)"], "كربوهيدرات": ["أرز (3)"], "خضروات": ["سلطة (2)"] },
+            "سناك المساء": { "كربوهيدرات": ["فشار (1)"] },
+            "العشاء": { "بروتين": ["جبن (1)"], "كربوهيدرات": ["2 توست (2)"], "خضروات": ["خضار مع جوز (2)"], "ألبان": ["روب (1)"] }
+        },
+        4: {
+            "الافطار": { "كربوهيدرات": ["كورن فلكس (3)"], "ألبان": ["حليب (1)"], "فواكه": ["فراولة (1)"] },
+            "سناك الصباح": { "دهون": ["فستق (1)"], "خضروات": ["بروكلي (1)"] },
+            "الغداء": { "بروتين": ["لحم (4.5)"], "كربوهيدرات": ["برياني (3)"], "دهون": ["مكسرات (2)"], "خضروات": ["شوربة (1)"], "ألبان": ["روب (1)"] },
+            "سناك المساء": { "فواكه": ["رمانة (1)"], "ألبان": ["لبن (1)"] },
+            "العشاء": { "بروتين": ["شيش طاووق (1)"], "كربوهيدرات": ["خبز تنور (4)"], "دهون": ["كريمة (1)"], "خضروات": ["طماطم وفلفل (1)"] }
+        }
+    };
+
+    let checks = JSON.parse(localStorage.getItem('checks_v4')) || {};
+    let ctx = null;
+
+    function loadDay() {
+        const d = document.getElementById('daySelector').value;
+        const root = document.getElementById('mainContainer');
+        root.innerHTML = '';
+        document.getElementById('dateLabel').innerText = new Date().toLocaleDateString('ar-BH', { weekday: 'long', day: 'numeric', month: 'long' });
+
+        for (let meal in daysData[d]) {
+            const head = document.createElement('div');
+            head.className = 'meal-card';
+            head.innerHTML = `<span>${meal}</span> <span style="font-size:12px;">+ إضافة صنف</span>`;
+            head.onclick = () => addItem(d, meal);
+            root.appendChild(head);
+
+            for (let sub in daysData[d][meal]) {
+                const sec = document.createElement('div');
+                sec.className = 'sub-sec';
+                sec.innerHTML = `<div class="sub-head" oncontextmenu="modifyAlt('${sub}'); return false;">- ${sub}</div>`;
+                
+                daysData[d][meal][sub].forEach((txt, i) => {
+                    const row = document.createElement('div');
+                    row.className = 'item-row';
+                    const id = `${d}-${meal}-${sub}-${i}`;
+                    row.innerHTML = `
+                        <div style="flex:1; cursor:pointer;" onclick="check('${id}')" oncontextmenu="modifyItem('${d}','${meal}','${sub}',${i}); return false;">${txt}</div>
+                        <div class="checkbox ${checks[id] ? 'checked' : ''}" onclick="check('${id}')"></div>
+                    `;
+                    sec.appendChild(row);
+                });
+                root.appendChild(sec);
+            }
+        }
+        calc();
+    }
+
+    function check(id) { checks[id] = !checks[id]; localStorage.setItem('checks_v4', JSON.stringify(checks)); loadDay(); }
+
+    function calc() {
+        const d = document.getElementById('daySelector').value;
+        let s = { "كربوهيدرات":0, "بروتين":0, "خضروات":0, "ألبان":0, "فواكه":0, "دهون":0 };
+        let total = 0;
+
+        for (let m in daysData[d]) {
+            for (let sub in daysData[d][m]) {
+                daysData[d][m][sub].forEach((t, i) => {
+                    if (checks[`${d}-${m}-${sub}-${i}`]) {
+                        const v = parseFloat(t.match(/\(([^)]+)\)/)?.[1] || 0);
+                        s[sub] += v; total += v;
+                    }
+                });
+            }
+        }
+        let h = ''; for(let x in s) h += `<div class="stat-card"><b>${x}</b><br>${s[x]}</div>`;
+        document.getElementById('detailGrid').innerHTML = h;
+        document.getElementById('totalLabel').innerText = `المجموع الكلي: ${total} حصة`;
+    }
+
+    function modifyItem(d, m, sub, i) {
+        ctx = { d, m, sub, i, type:'edit' };
+        document.getElementById('modalTitle').innerText = "تعديل البند";
+        document.getElementById('editInput').value = daysData[d][m][sub][i];
+        document.getElementById('altInfo').innerText = "البدائل: " + alts[sub];
+        document.getElementById('delBtn').style.display='block';
+        showM();
+    }
+
+    function addItem(d, m) {
+        const sub = prompt("القسم؟ (بروتين، كربوهيدرات، دهون...)");
+        if (!sub || !alts[sub]) return;
+        ctx = { d, m, sub, type:'add' };
+        document.getElementById('modalTitle').innerText = "إضافة صنف لـ " + m;
+        document.getElementById('editInput').value = " (1)";
+        document.getElementById('delBtn').style.display='none';
+        showM();
+    }
+
+    function modifyAlt(sub) {
+        ctx = { sub, type:'alt' };
+        document.getElementById('modalTitle').innerText = "تعديل قائمة البدائل";
+        document.getElementById('editInput').value = alts[sub];
+        document.getElementById('delBtn').style.display='none';
+        showM();
+    }
+
+    function applyChanges() {
+        const v = document.getElementById('editInput').value;
+        if (ctx.type === 'edit') daysData[ctx.d][ctx.m][ctx.sub][ctx.i] = v;
+        else if (ctx.type === 'add') {
+            if (!daysData[ctx.d][ctx.m][ctx.sub]) daysData[ctx.d][ctx.m][ctx.sub] = [];
+            daysData[ctx.d][ctx.m][ctx.sub].push(v);
+        } else { alts[ctx.sub] = v; localStorage.setItem('alts_db', JSON.stringify(alts)); }
+        closeModal(); loadDay();
+    }
+
+    function removeItem() { daysData[ctx.d][ctx.m][ctx.sub].splice(ctx.i, 1); closeModal(); loadDay(); }
+    function showM() { document.getElementById('editModal').style.display='block'; document.getElementById('overlay').style.display='block'; }
+    function closeModal() { document.getElementById('editModal').style.display='none'; document.getElementById('overlay').style.display='none'; }
+
+    async function saveAsPNG() {
+        const canvas = await html2canvas(document.getElementById('printArea'), { scale: 2 });
+        const link = document.createElement('a');
+        link.download = `تقرير_أبو_علي_${new Date().toLocaleDateString()}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
+    }
+
+    loadDay();
+</script>
+</body>
+</html>
